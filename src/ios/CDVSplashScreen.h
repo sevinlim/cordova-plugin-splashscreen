@@ -32,7 +32,12 @@ typedef struct {
 
 @interface CDVSplashScreen : CDVPlugin {
     UIActivityIndicatorView* _activityView;
-    UIImageView* _imageView;
+    
+    UIImageView* _imageView_p;
+    UIImageView* _imageView_l;
+    BOOL _supportsLandscape;
+    BOOL _supportsPortrait;
+    
     NSString* _curImageName;
     BOOL _visible;
 }

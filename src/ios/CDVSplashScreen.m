@@ -55,7 +55,9 @@
 
 - (void)observeValueForKeyPath:(NSString*)keyPath ofObject:(id)object change:(NSDictionary*)change context:(void*)context
 {
-    [self updateImage];
+    NSLog(@"keyPath: %@, obj: %@, change: %@", keyPath, [object description], [change description]);
+//    [self updateImage];
+    [self updateImageToFrame:((UIView*)object).frame];
 }
 
 - (void)createViews
@@ -88,8 +90,7 @@
     [_activityView startAnimating];
 
     // Set the frame & image later.
-    _imageView = [[UIImageView alloc] init];
-    [parentView addSubview:_imageView];
+    [self initImagesWithParent:parentView];
 
     id showSplashScreenSpinnerValue = [self.commandDelegate.settings objectForKey:[@"ShowSplashScreenSpinner" lowercaseString]];
     // backwards compatibility - if key is missing, default to true
@@ -101,15 +102,12 @@
     // Bounds for landscape since it captures the rotation.
     [parentView addObserver:self forKeyPath:@"frame" options:0 context:nil];
     [parentView addObserver:self forKeyPath:@"bounds" options:0 context:nil];
-
-    [self updateImage];
 }
 
 - (void)destroyViews
 {
-    [_imageView removeFromSuperview];
+    [self destroyImages];
     [_activityView removeFromSuperview];
-    _imageView = nil;
     _activityView = nil;
     _curImageName = nil;
 
@@ -141,128 +139,20 @@
     return device;
 }
 
-- (NSString*)getImageName:(UIInterfaceOrientation)currentOrientation delegate:(id<CDVScreenOrientationDelegate>)orientationDelegate device:(CDV_iOSDevice)device
-{
-    // Use UILaunchImageFile if specified in plist.  Otherwise, use Default.
-    NSString* imageName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"UILaunchImageFile"];
-    
-    NSUInteger supportedOrientations = [orientationDelegate supportedInterfaceOrientations];
-    
-    // Checks to see if the developer has locked the orientation to use only one of Portrait or Landscape
-    BOOL supportsLandscape = (supportedOrientations & UIInterfaceOrientationMaskLandscape);
-    BOOL supportsPortrait = (supportedOrientations & UIInterfaceOrientationMaskPortrait || supportedOrientations & UIInterfaceOrientationMaskPortraitUpsideDown);
-    // this means there are no mixed orientations in there
-    BOOL isOrientationLocked = !(supportsPortrait && supportsLandscape);
-    
-    if (imageName) {
-        imageName = [imageName stringByDeletingPathExtension];
-    } else {
-        imageName = @"Default";
+-(NSString*) getInterfaceOrientationString:(UIInterfaceOrientation)orientation {
+    switch (orientation) {
+        case UIInterfaceOrientationPortrait:
+            return @"Portrait";
+        case UIInterfaceOrientationPortraitUpsideDown:
+            return @"Upsidedown";
+        case UIInterfaceOrientationLandscapeLeft:
+            return @"LandscapeLeft";
+        case UIInterfaceOrientationLandscapeRight:
+            return @"LandscapeRight";
+        default:
+            break;
     }
-    
-    if (device.iPhone5) { // does not support landscape
-        imageName = [imageName stringByAppendingString:@"-568h"];
-    } else if (device.iPhone6) { // does not support landscape
-        imageName = [imageName stringByAppendingString:@"-667h"];
-    } else if (device.iPhone6Plus) { // supports landscape
-        if (isOrientationLocked) {
-            imageName = [imageName stringByAppendingString:(supportsLandscape ? @"-Landscape" : @"")];
-        } else {
-            switch (currentOrientation) {
-                case UIInterfaceOrientationLandscapeLeft:
-                case UIInterfaceOrientationLandscapeRight:
-                        imageName = [imageName stringByAppendingString:@"-Landscape"];
-                    break;
-                default:
-                    break;
-            }
-        }
-        imageName = [imageName stringByAppendingString:@"-736h"];
-
-    } else if (device.iPad) { // supports landscape
-        if (isOrientationLocked) {
-            imageName = [imageName stringByAppendingString:(supportsLandscape ? @"-Landscape" : @"-Portrait")];
-        } else {
-            switch (currentOrientation) {
-                case UIInterfaceOrientationLandscapeLeft:
-                case UIInterfaceOrientationLandscapeRight:
-                    imageName = [imageName stringByAppendingString:@"-Landscape"];
-                    break;
-                    
-                case UIInterfaceOrientationPortrait:
-                case UIInterfaceOrientationPortraitUpsideDown:
-                default:
-                    imageName = [imageName stringByAppendingString:@"-Portrait"];
-                    break;
-            }
-        }
-    }
-    
-    return imageName;
-}
-
-// Sets the view's frame and image.
-- (void)updateImage
-{
-    NSString* imageName = [self getImageName:self.viewController.interfaceOrientation delegate:(id<CDVScreenOrientationDelegate>)self.viewController device:[self getCurrentDevice]];
-
-    if (![imageName isEqualToString:_curImageName]) {
-        UIImage* img = [UIImage imageNamed:imageName];
-        _imageView.image = img;
-        _curImageName = imageName;
-    }
-
-    // Check that splash screen's image exists before updating bounds
-    if (_imageView.image) {
-        [self updateBounds];
-    } else {
-        NSLog(@"WARNING: The splashscreen image named %@ was not found", imageName);
-    }
-}
-
-- (void)updateBounds
-{
-    UIImage* img = _imageView.image;
-    CGRect imgBounds = (img) ? CGRectMake(0, 0, img.size.width, img.size.height) : CGRectZero;
-
-    CGSize screenSize = [self.viewController.view convertRect:[UIScreen mainScreen].bounds fromView:nil].size;
-    UIInterfaceOrientation orientation = self.viewController.interfaceOrientation;
-    CGAffineTransform imgTransform = CGAffineTransformIdentity;
-
-    /* If and only if an iPhone application is landscape-only as per
-     * UISupportedInterfaceOrientations, the view controller's orientation is
-     * landscape. In this case the image must be rotated in order to appear
-     * correctly.
-     */
-    BOOL isIPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
-    if (UIInterfaceOrientationIsLandscape(orientation) && !isIPad) {
-        imgTransform = CGAffineTransformMakeRotation(M_PI / 2);
-        imgBounds.size = CGSizeMake(imgBounds.size.height, imgBounds.size.width);
-    }
-
-    // There's a special case when the image is the size of the screen.
-    if (CGSizeEqualToSize(screenSize, imgBounds.size)) {
-        CGRect statusFrame = [self.viewController.view convertRect:[UIApplication sharedApplication].statusBarFrame fromView:nil];
-        if (!(IsAtLeastiOSVersion(@"7.0"))) {
-            imgBounds.origin.y -= statusFrame.size.height;
-        }
-    } else if (imgBounds.size.width > 0) {
-        CGRect viewBounds = self.viewController.view.bounds;
-        CGFloat imgAspect = imgBounds.size.width / imgBounds.size.height;
-        CGFloat viewAspect = viewBounds.size.width / viewBounds.size.height;
-        // This matches the behaviour of the native splash screen.
-        CGFloat ratio;
-        if (viewAspect > imgAspect) {
-            ratio = viewBounds.size.width / imgBounds.size.width;
-        } else {
-            ratio = viewBounds.size.height / imgBounds.size.height;
-        }
-        imgBounds.size.height *= ratio;
-        imgBounds.size.width *= ratio;
-    }
-
-    _imageView.transform = imgTransform;
-    _imageView.frame = imgBounds;
+    return @"Unknown";
 }
 
 - (void)setVisible:(BOOL)visible
@@ -283,7 +173,7 @@
 
     // Never animate the showing of the splash screen.
     if (visible) {
-        if (_imageView == nil) {
+        if (_imageView_p == nil && _imageView_l == nil) {
             [self createViews];
         }
     } else if (fadeDuration == 0) {
@@ -293,7 +183,8 @@
                           duration:fadeDuration
                            options:UIViewAnimationOptionTransitionNone
                         animations:^(void) {
-                            [_imageView setAlpha:0];
+                            [_imageView_p setAlpha:0];
+                            [_imageView_l setAlpha:0];
                             [_activityView setAlpha:0];
                         }
                         completion:^(BOOL finished) {
@@ -304,5 +195,211 @@
         ];
     }
 }
+
+
+-(void)initImagesWithParent:(UIView*)parentView {
+    NSUInteger supportedOrientations = [self.viewController supportedInterfaceOrientations];
+    _supportsLandscape = (supportedOrientations & UIInterfaceOrientationMaskLandscape);
+    _supportsPortrait = (supportedOrientations & UIInterfaceOrientationMaskPortrait || supportedOrientations & UIInterfaceOrientationMaskPortraitUpsideDown);
+    
+
+    _imageView_p = [[UIImageView alloc] init];
+    [_imageView_p setHidden:YES];
+    _imageView_l = [[UIImageView alloc] init];
+    [_imageView_l setHidden:YES];
+    
+    if (_supportsPortrait) {
+        NSString* imageName = [self getImageName:UIInterfaceOrientationPortrait device:[self getCurrentDevice]];
+        UIImage* img = [UIImage imageNamed:imageName];
+        if (img) {
+            _imageView_p.image = img;
+            [self updateImageBounds:_imageView_p];
+            [parentView addSubview:_imageView_p];
+        }
+        else {
+            NSLog(@"WARNING! Image '%@' not found!", imageName);
+        }
+    }
+    
+    
+    if (_supportsLandscape) {
+        NSString* imageName = [self getImageName:UIInterfaceOrientationLandscapeLeft device:[self getCurrentDevice]];
+        UIImage* img = [UIImage imageNamed:imageName];
+        if (img) {
+            _imageView_l.image = img;
+            [self updateImageBounds:_imageView_l];
+            [parentView addSubview:_imageView_l];
+        }
+        else {
+            NSLog(@"WARNING! Image '%@' not found!", imageName);
+        }
+    }
+    
+    [self updateImageToFrame:self.viewController.view.bounds];
+}
+
+-(void)destroyImages {
+    if (_supportsPortrait) [_imageView_p removeFromSuperview];
+    if (_supportsLandscape) [_imageView_l removeFromSuperview];
+    _imageView_p = nil;
+    _imageView_l = nil;
+}
+
+-(void)updateImageBounds:(UIImageView*)imgView {
+    UIImage* img = imgView.image;
+    CGRect imgBounds = (img) ? CGRectMake(0, 0, img.size.width, img.size.height) : CGRectZero;
+    
+    CGSize screenSize = [self.viewController.view convertRect:[UIScreen mainScreen].bounds fromView:nil].size;
+    
+    UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
+    if (imgBounds.size.width > imgBounds.size.height) {
+        orientation = UIInterfaceOrientationLandscapeLeft;
+    }
+    
+    CGAffineTransform imgTransform = CGAffineTransformIdentity;
+    
+    /* If and only if an iPhone application is landscape-only as per
+     * UISupportedInterfaceOrientations, the view controller's orientation is
+     * landscape. In this case the image must be rotated in order to appear
+     * correctly.
+     */
+    BOOL isIPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+    if (UIInterfaceOrientationIsLandscape(orientation) && !isIPad) {
+        imgTransform = CGAffineTransformMakeRotation(M_PI / 2);
+        imgBounds.size = CGSizeMake(imgBounds.size.height, imgBounds.size.width);
+    }
+    
+    // There's a special case when the image is the size of the screen.
+    if (CGSizeEqualToSize(screenSize, imgBounds.size)) {
+        CGRect statusFrame = [self.viewController.view convertRect:[UIApplication sharedApplication].statusBarFrame fromView:nil];
+        if (!(IsAtLeastiOSVersion(@"7.0"))) {
+            imgBounds.origin.y -= statusFrame.size.height;
+        }
+    } else if (imgBounds.size.width > 0) {
+        CGRect viewBounds = self.viewController.view.bounds;
+        if ((viewBounds.size.width > viewBounds.size.height && orientation == UIInterfaceOrientationPortrait) ||
+            (viewBounds.size.width < viewBounds.size.height && orientation == UIInterfaceOrientationLandscapeLeft)) {
+            CGSize newbounds = CGSizeMake(viewBounds.size.height, viewBounds.size.width);
+            viewBounds.size = newbounds;
+        }
+        CGFloat imgAspect = imgBounds.size.width / imgBounds.size.height;
+        CGFloat viewAspect = viewBounds.size.width / viewBounds.size.height;
+        // This matches the behaviour of the native splash screen.
+        CGFloat ratio;
+        if (viewAspect > imgAspect) {
+            ratio = viewBounds.size.width / imgBounds.size.width;
+        } else {
+            ratio = viewBounds.size.height / imgBounds.size.height;
+        }
+        imgBounds.size.height *= ratio;
+        imgBounds.size.width *= ratio;
+    }
+    
+    imgView.transform = imgTransform;
+    imgView.frame = imgBounds;
+}
+
+-(BOOL)isLandscape:(UIInterfaceOrientation)orientation {
+    return orientation == UIInterfaceOrientationLandscapeRight || orientation == UIInterfaceOrientationLandscapeLeft;
+}
+
+-(BOOL)isPortrait:(UIInterfaceOrientation)orientation {
+    return orientation == UIInterfaceOrientationPortrait || orientation == UIInterfaceOrientationPortraitUpsideDown;
+}
+
+-(void)rotateImage:(UIImageView*)imgView {
+    CGAffineTransform imgTransform = CGAffineTransformMakeRotation(M_PI / 2);
+    CGSize flipFrame =  CGSizeMake(imgView.frame.size.height, imgView.frame.size.width);
+    imgView.frame = CGRectMake(0, 0, flipFrame.width, flipFrame.height);
+    imgView.transform = imgTransform;
+    
+}
+
+-(void)showLandscape:(CGRect)frame {
+    [_imageView_p setHidden:YES];
+    [_imageView_l setHidden:NO];
+    _imageView_l.frame = frame;
+}
+
+-(void)showPortrait:(CGRect)frame {
+    [_imageView_p setHidden:NO];
+    [_imageView_l setHidden:YES];
+    _imageView_p.frame = frame;
+}
+
+-(void)updateImageToFrame:(CGRect)frame {
+    UIInterfaceOrientation currentOrientation = frame.size.width > frame.size.height ? UIInterfaceOrientationLandscapeLeft : UIInterfaceOrientationPortrait;
+    
+    if ([self isLandscape:currentOrientation]) {
+        // simple case
+        if (_supportsLandscape) {
+            [self showLandscape:frame];
+        }
+        else {
+            [self showPortrait:frame];
+            // rotate image and flip frame
+            [self rotateImage:_imageView_p];
+        }
+    }
+    else {
+        // simple case
+        if (_supportsPortrait) {
+            [self showPortrait:frame];
+        }
+        else {
+            [self showLandscape:frame];
+            // rotate image and flip frame
+            [self rotateImage:_imageView_l];
+        }
+    }
+    
+}
+
+- (NSString*)getImageName:(UIInterfaceOrientation)orientation device:(CDV_iOSDevice)device
+{
+    // Use UILaunchImageFile if specified in plist.  Otherwise, use Default.
+    NSString* imageName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"UILaunchImageFile"];
+    
+    if (imageName) {
+        imageName = [imageName stringByDeletingPathExtension];
+    } else {
+        imageName = @"Default";
+    }
+    
+    if (device.iPhone5) { // does not support landscape
+        imageName = [imageName stringByAppendingString:@"-568h"];
+    } else if (device.iPhone6) { // does not support landscape
+        imageName = [imageName stringByAppendingString:@"-667h"];
+    } else if (device.iPhone6Plus) { // supports landscape
+        switch (orientation) {
+            case UIInterfaceOrientationLandscapeLeft:
+            case UIInterfaceOrientationLandscapeRight:
+                imageName = [imageName stringByAppendingString:@"-Landscape"];
+                break;
+            default:
+                break;
+        }
+        imageName = [imageName stringByAppendingString:@"-736h"];
+        
+    } else if (device.iPad) { // supports landscape
+        switch (orientation) {
+            case UIInterfaceOrientationLandscapeLeft:
+            case UIInterfaceOrientationLandscapeRight:
+                imageName = [imageName stringByAppendingString:@"-Landscape"];
+                break;
+                
+            case UIInterfaceOrientationPortrait:
+            case UIInterfaceOrientationPortraitUpsideDown:
+            default:
+                imageName = [imageName stringByAppendingString:@"-Portrait"];
+                break;
+        }
+    }
+    
+    return imageName;
+}
+
+
+
 
 @end

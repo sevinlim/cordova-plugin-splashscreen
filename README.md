@@ -23,6 +23,10 @@
 
 This plugin displays and hides a splash screen during application launch.
 
+## Fork Updates
+
+Modified iOS source to load 2 images and swap in between them.
+
 ## Installation
 
     cordova plugin add cordova-plugin-splashscreen
